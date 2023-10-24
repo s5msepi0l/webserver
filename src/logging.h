@@ -45,13 +45,25 @@ namespace logging {
 	}
 
 	std::string fetch_date() {
-	   std::time_t now = std::time(nullptr);
+		std::time_t now = std::time(nullptr);
 		char buf[20];
 		std::tm tm;
 		localtime_r(&now, &tm);  // using localtime_r for thread-safe behavior
 
 		// format the date as a string
 		if (std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm)) 
+			return std::string(buf);
+		return "";
+	}
+
+	// basically just fetch_date but with more precision
+	std::string fetch_date_s() {
+		std::time_t now = std::time(nullptr);
+		char buf[40];
+		std::tm tm;
+		localtime_r(&now &tm);
+
+		if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm))
 			return std::string(buf);
 		return "";
 	}
