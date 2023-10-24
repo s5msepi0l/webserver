@@ -19,9 +19,10 @@
 
 Note: Http Keep-Alive support is done via threadpool with added load queuing
 Note: Refrain from tweaking the networking structs too much as it may cause tech-debt
+Note: logs only contain connections information along with the amount of requests sent by the client
 
 TODO: 
-	- Add support http Keep-Alive support via multithreading
+	- Add support http Keep-Alive support via multithreadingi
 	- Implement Keep-Alive server-size timeout
 	- Add optional ip-address whitelisting
 	- Add optional Data logging
@@ -35,6 +36,7 @@ TODO:
 
 #include "threadpool.h"
 #include "cache.h"
+#include "logging.h"
 
 #include <iostream>
 #include <queue>
@@ -60,8 +62,13 @@ TODO:
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <arpa/inet.h>
-    #include <unistd.h>
+	
+	#include <sys/ioctl.h> // ip fetching
+	#include <linux/if.h>
+
+	#include <unistd.h>
 	#include <cerrno> // idk if windows supports perror too but im too lazy to crosscheck
+
 
     #define closesocket(fd) close(fd)
 
@@ -219,6 +226,16 @@ inline void display_packet(packet_response Src) {
 }
 
 namespace http {
+	// Todo: finish this mess
+	inline std::string fetch_ip(SOCKET fd) {
+		struct sockaddr_in addr;
+		socklen_t addr_size = sizeof(struct sockaddr_in);
+		int res = getpeername(fd, (struct sockaddr *)&addr, &addr_size);
+		
+		char clientip[20];
+		return std::string(inet_ntoa(addr.sin_addr));
+	}
+
     class packet_parser {
     public: //variables
         std::unordered_map<int, std::string> status_codes;
@@ -300,12 +317,16 @@ namespace http {
 	class request_router {
 	private:
         file_cache cache;
+		logging::logger w_log;
         packet_parser parser;
         std::unordered_map<destination, std::function<void(parsed_request&, packet_response&)>> routes;
 
     public:
-        request_router(std::string cache_path) :
-            cache(cache_path, CACHE_SIZE) {
+		//all logs are performed by request routes e.g
+		//Initial connection, request packets sent, tcp disconnect, etc...
+        request_router(std::string cache_path, std::string log_path) :
+            cache(cache_path, CACHE_SIZE),
+			w_log(log_path){
         }
 
         inline void insert(destination path, std::function<void(parsed_request&, packet_response&)> route) {
@@ -313,9 +334,16 @@ namespace http {
         }
 
 		// executed by threadpool contains 90% of all important routing and miscellaneous functionality
-        void execute(request_packet client) {
+        // Note: ugly ass indentaion and horrendus if-else statement(s)
+		void execute(request_packet client) {
             std::cout << "client thread start\n";
-			int packets_sent = 0;	
+
+			// %Y-%m-%d - source address - event information
+			std::string date = logging::fetch_date();
+			std::string src_addr = fetch_ip(client.fd); // public ip address might 
+			w_log.write(date, 
+
+			int packets_sent = 0;	// used for logging purposes
 			while (1) {	
 			int status = _recv(client.fd, client.data, false);
 			std::cout << "connection status: " << status << std::endl;
@@ -374,8 +402,6 @@ namespace http {
                 #endif
 					
             }
-			
-			
         }
     };
 
@@ -392,10 +418,11 @@ namespace http {
         std::thread worker;
         std::atomic<bool> flag;
 
+
     public:
-        webserver(const char *cache_path, int port, int backlog, int thread_count):
+        webserver(const char *cache_path, const char *logs_path, int port, int backlog, int thread_count):
         pool(thread_count),
-        routes(std::string(cache_path)){
+        routes(std::string(cache_path), ){
             socket_fd = socket(AF_INET, SOCK_STREAM, 0);
             if (socket_fd == SOCKET_ERROR)
                 throw std::runtime_error("Unable to initialize webserver socket");
