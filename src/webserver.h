@@ -29,6 +29,7 @@ TODO:
 	- Implement automatic chunking based on cache size when retrieved
 	- Make JSON implementation less "fucky" to work with
 	- Add basic json support for receiving packet and sending
+	- Update logging for more customizability and robust functionality
 */
 
 
@@ -50,6 +51,9 @@ TODO:
 #include <queue>
 #include <cstring>
 
+#define CLIENT_CON "[Connection established]"
+#define CLIENT_DISCON "[Connection terminated]"
+
 #ifdef _WIN32
 
 #include <winSock2.h>
@@ -69,9 +73,7 @@ TODO:
 	#include <unistd.h>
 	#include <cerrno> // idk if windows supports perror too but im too lazy to crosscheck
 
-
     #define closesocket(fd) close(fd)
-
 
     #define SOCKET int
 
@@ -339,9 +341,8 @@ namespace http {
             std::cout << "client thread start\n";
 
 			// %Y-%m-%d - source address - event information
-			std::string date = logging::fetch_date();
 			std::string src_addr = fetch_ip(client.fd); // public ip address might 
-			w_log.write(date, 
+			w_log.write(logging::fetch_date(), " - ", src_addr, "Connected"); 
 
 			int packets_sent = 0;	// used for logging purposes
 			while (1) {	
@@ -385,7 +386,6 @@ namespace http {
 					packets_sent++;
                 }
             }
-				std::cout << "iterate\n";
 			}
 
 
@@ -418,11 +418,10 @@ namespace http {
         std::thread worker;
         std::atomic<bool> flag;
 
-
     public:
         webserver(const char *cache_path, const char *logs_path, int port, int backlog, int thread_count):
         pool(thread_count),
-        routes(std::string(cache_path), ){
+        routes(std::string(cache_path), std::string(logs_path)){
             socket_fd = socket(AF_INET, SOCK_STREAM, 0);
             if (socket_fd == SOCKET_ERROR)
                 throw std::runtime_error("Unable to initialize webserver socket");
@@ -434,7 +433,6 @@ namespace http {
 
             if (bind(socket_fd, (sockaddr*)&server_addr, server_len) == SOCKET_ERROR)
                 throw std::runtime_error("Unable to bind webserver address\n");
-
 
             if (listen(socket_fd, backlog) == SOCKET_ERROR)
                 throw std::runtime_error("Unable to listen on port: " + std::to_string(port));
