@@ -7,8 +7,14 @@
 
 #pragma once
 
-#ifndef MAX_LOG_SIZE
-#define MAX_LOG_SIZE 5 * 1024 * 1024 // ~5mb, bss (dword)
+#ifndef LOGGER_MAX_LOG_SIZE
+#define LOGGER_MAX_LOG_SIZE 5 * 1024 * 1024 // ~5mb, dword bss
+#endif 
+
+// kernel cache's all write calls until the file descriptor is closed
+// Reopen file once a certain cache size is reached
+#ifndef LOGGER_ENABLE_AUTO_WRITE
+#define LOGGER_ENABLE_AUTO_WRITE LOGGER_MAX_LOG_SIZE
 #endif
 
 #include <iostream> 
@@ -59,28 +65,28 @@ namespace logging {
 	// basically just fetch_date but with more precision
 	std::string fetch_date_s() {
 		std::time_t now = std::time(nullptr);
-		char buf[40];
+		char buf[64]; // Increased buffer size to accommodate the formatted date string
 		std::tm tm;
-		localtime_r(&now &tm);
-
-		if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm))
-			return std::string(buf);
+		if (localtime_r(&now, &tm) != nullptr) { // Checking if localtime_r returns a non-null pointer
+			if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm)) {
+				return std::string(buf);
+			}
+		}
 		return "";
-	}
-
-	size_t fetch_size(std::string path) {
-		struct stat stat_buf;
-		int rc = stat(path.c_str(), &stat_buf);
-		return rc == 0 ? static_cast<ssize_t>(stat_buf.st_size) : -1;
-	}
+	}	
+	
 
 	// does somewhat clog upp the main thread if the logs folder
 	// is sufficently large enough
 	class logger {
 		private:
 			std::string path;
+			
 			std::ofstream fd;
-			size_t fd_size; 
+			std::string fd_id;
+
+			size_t fd_size = 0; 
+			size_t chunk_size = 0;
 
 		public:
 			logger(std::string log_path):
@@ -92,10 +98,16 @@ namespace logging {
 					if (datecmp(buffer, max, "log_"))
 						max = buffer;
 				}
+
 				if (max.empty()) { // directory is empty
-					fd = std::ofstream( // close old file and create new file
+					fd.open( // create new file
 					std::string(path + "/log_" + fetch_date() + ".txt"),
-					std::ios::out | std::ios::app );
+					std::ios::app );
+				} else {
+					fd.open(max, std::ios::app);
+					size_t pos = max.find_last_of("/");
+					if (pos != std::string::npos)
+						fd_id = max.substr(pos + 1);
 				}
 			}
 			
@@ -103,10 +115,17 @@ namespace logging {
 			void write(Args... args) {
 				std::stringstream ss;
 				(ss << ... << args);
+				
+				if (!fd.is_open()) {
+					std::cerr << "Unable to log content" << ss.str() << std::endl;
+				}
+
+				std::cout << "[*] Loggin: " << ss.str() << std::endl;
 				log(ss.str());
 			}
 
 			~logger() {
+				std::cout << "\n\n LOGGING DESTRUCTOR CALLED \n\n";
 				fd.close();
 			}
 
@@ -115,16 +134,29 @@ namespace logging {
 		private:
 			// automatically adds a new line char at the end
 			inline void log(std::string src) { 
-				if (fd_size >= MAX_LOG_SIZE) {
+				if (chunk_size >= LOGGER_ENABLE_AUTO_WRITE) { //
 					fd.close();
-					fd = std::ofstream( // close old file and create new file
-						std::string(path + "/log_" + fetch_date() + ".txt"),
-						std::ios::out | std::ios::app );
+					
+					fd.open(
+					std::string(path + "/" + fd_id),
+					std::ios::app );
+
+					chunk_size = 0;
 				}
-				
+
+				if (fd_size >= LOGGER_MAX_LOG_SIZE) {
+					fd.close();
+					fd.open( // close old file and create new file
+						std::string(path + "/log_" + fetch_date() + ".txt"),
+						std::ios::app );
+					fd_size = 0;	
+				}
+
 				if (fd.is_open()) {
 					fd << std::string(src + '\n');
+					
 					fd_size += src.size() + 1;
+					chunk_size += src.size() + 1;
 				}
 			}
 	};
