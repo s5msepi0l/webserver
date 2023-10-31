@@ -71,7 +71,8 @@ namespace logging {
 			if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm)) {
 				return std::string(buf);
 			}
-		}
+		}'
+		
 		return "";
 	}	
 	
@@ -124,7 +125,7 @@ namespace logging {
 				log(ss.str());
 			}
 
-			~logger() {
+			void shutdown() {
 				std::cout << "\n\n LOGGING DESTRUCTOR CALLED \n\n";
 				fd.close();
 			}
