@@ -17,6 +17,9 @@
         are involved
     RANT END
 
+Note: to change (any) of the finner details via macro defenitions you will have to
+		define them before you include the header file, macro defenitions are documented in the readme
+
 Note: Http Keep-Alive support is done via threadpool with added load queuing
 Note: Refrain from tweaking the networking structs too much as it may cause tech-debt
 Note: logs only contain connections information along with the amount of requests sent by the client
@@ -51,6 +54,14 @@ TODO:
 #include <queue>
 #include <cstring>
 
+#ifndef BUFFER_SIZE 
+#define BUFFER_SIZE 8192
+#endif
+
+#ifndef CACHE_SIZE 
+#define CACHE_SIZE 5
+#endif
+
 #define CLIENT_CON "[Connection established]"
 #define CLIENT_DISCON "[Connection terminated]"
 
@@ -82,9 +93,6 @@ TODO:
 #endif
 
 #define _min(a, b) ((a) < (b) ? (a) : (b))
-
-#define BUFFER_SIZE 8192
-#define CACHE_SIZE 5
 
 inline int _send(SOCKET fd, std::string buffer) {
     return send(fd, buffer.c_str(), buffer.size(), 0);
@@ -154,7 +162,9 @@ typedef struct {
     std::unordered_map<std::string, std::string> cookies;
 } parsed_request;
 
-typedef struct {
+typedef struct packet_response {
+	SOCKET fd;
+
     int status;
     std::string body;
     std::string content_type;
@@ -162,7 +172,9 @@ typedef struct {
 
     int chunked;
 
-    void _send_all(std::string cache_mem, parsed_request &request) {
+	packet_response(SOCKET Dst): fd(Dst) {}
+
+    inline void _send_all(std::string cache_mem, parsed_request &request) {
         long cache_size = cache_mem.size();
         std::stringstream res;
         res << "HTTP/1.1 200 OK\r\n"
@@ -197,9 +209,10 @@ typedef struct {
         send(request.fd, "0\r\n\r\n", 5, 0);
     }
 
-    inline void _send(std::string cache_mem, parsed_request &request) { // single packet response
-        send(request.fd, cache_mem.c_str(), cache_mem.size(), 0);
+    void _send(std::string cache_mem, SOCKET fd) { // single packet response
+        send(fd, cache_mem.c_str(), cache_mem.size(), 0);
     }
+
 }packet_response;
 
 inline void set_body_content(std::string path, packet_response &content) {
@@ -220,11 +233,24 @@ inline void set_content_status(int code, packet_response& content) {
     content.status = code;
 }
 
+// mainly used for debugging purposes
 inline void display_packet(packet_response Src) {
     std::cout << "status: " << Src.status << '\n'
         << "length: " << Src.length << '\n'
         << "content-type: " << Src.content_type << '\n'
         << "body: " << Src.body << std::endl;
+}
+
+// contains logging utility relevant to the webserver
+namespace log_util {
+	typedef struct log_msg {
+		std::string level;
+		std::string msg;
+	} log_msg;
+
+
+	log_msg OUT_OF_MEMORY { "WARNING", "Out of memory error"};
+	log_msg CONNECTION_RECV { "[INFO]", "[Connection received]" };
 }
 
 namespace http {
@@ -316,19 +342,25 @@ namespace http {
         }
     };
 
+	// done for Readability sakes will, O2 will probably even it out
+	enum route_status{
+		NOT_IMPLEMENTED = 0,
+		IMPLEMENTED = 1
+	};		
+
 	class request_router {
 	private:
         file_cache cache;
-		logging::logger w_log;
+		logging::logger &w_log;
         packet_parser parser;
         std::unordered_map<destination, std::function<void(parsed_request&, packet_response&)>> routes;
 
     public:
 		//all logs are performed by request routes e.g
 		//Initial connection, request packets sent, tcp disconnect, etc...
-        request_router(std::string cache_path, std::string log_path) :
+        request_router(std::string cache_path, logging::logger &log_ref) :
             cache(cache_path, CACHE_SIZE),
-			w_log(log_path){
+			w_log(log_ref){
         }
 
         inline void insert(destination path, std::function<void(parsed_request&, packet_response&)> route) {
@@ -342,51 +374,56 @@ namespace http {
 
 			// %Y-%m-%d - source address - event information
 			std::string src_addr = fetch_ip(client.fd); // public ip address might 
-			w_log.write(logging::fetch_date(), " - ", src_addr, "Connected"); 
+			w_log.write(logging::fetch_date_s(), " - ", src_addr, " Connected"); 
 
 			int packets_sent = 0;	// used for logging purposes
 			while (1) {	
-			int status = _recv(client.fd, client.data, false);
-			std::cout << "connection status: " << status << std::endl;
-			if (status <= 0) break;
+			    int status = _recv(client.fd, client.data, false);
+			    std::cout << "connection status: " << status << std::endl;
+			    if (status <= 0) break;
 
-            parsed_request request = parser.parse(client);
-            packet_response response;
+                parsed_request request = parser.parse(client);
+                packet_response response(request.fd);
 
-			// ugly ass giant if-else statement, change this asap possibly to a swtich case via enum's
-            std::function<void(parsed_request&, packet_response&)> func = routes[request.dest];
-			if (func == nullptr) { 
-                std::cout << "no route found\n" << request.dest.path << " path \n" << request.dest.method << std::endl;
+			    // ugly ass giant if-else statement, change this asap possibly to a swtich case via enum's
+                std::function<void(parsed_request&, packet_response&)> func = routes[request.dest];
+                route_status res = route_stat(func);
+                switch(res) {
+                    case NOT_IMPLEMENTED:
+                        std::cout << "no route found\n" << request.dest.path << " path \n" << request.dest.method << std::endl;
 
-                std::string buffer = "Unable to find requested path";
-                response.status = 501;
-                response.body = buffer;
-                set_content_type("text/html", response);
-            }
-            else {
-				std::cout << "excv interface\n";
-                func(request, response);
-                std::string cache_mem = cache.fetch(response.body);
-                long cache_size = cache_mem.size();
+                        response.status = 501;
+                        response.body = "Unable to find requested_path";
+                        set_content_type("text/html", response);
+                        break;
+                    
+                    case IMPLEMENTED:
+                        std::cout << "excv interface\n";
+                        func(request, response);
+                        std::string cache_mem = cache.fetch(response.body);
+                        long cache_size = cache_mem.size();
 
-                // file transfer
-                if (response.chunked) {
-                    response._send_all(cache_mem, request);
+                        // file transfer
+                        if (response.chunked) {
+                            response._send_all(cache_mem, request);
+                        }
+                        else {
+					        std::cout << "normal response\n\n\n\n\n\n\n\n";
+
+					        response.body = cache_mem;
+                            response.length = cache_mem.size();
+                            std::string packet_buffer = parser.format(response);
+					        
+
+					        //_send(request.fd, packet_buffer);
+					        std::cout << "sending response: " << send(request.fd, packet_buffer.c_str(), packet_buffer.size(), 0) << std::endl;
+					        packets_sent++;
+                        }
+						
+						break;
+                    }    
                 }
-                else {
-					std::cout << "normal response\n\n\n\n\n\n\n\n";
-
-					response.body = cache_mem;
-                    response.length = cache_mem.size();
-                    std::string packet_buffer = parser.format(response);
-					
-
-					//_send(request.fd, packet_buffer);
-					std::cout << "sending response: " << send(request.fd, packet_buffer.c_str(), packet_buffer.size(), 0) << std::endl;
-					packets_sent++;
-                }
-            }
-			}
+			
 
 
 			std::cout << "closing: " << client.fd << std::endl;
@@ -403,11 +440,18 @@ namespace http {
 					
             }
         }
+
+	private:
+		inline route_status route_stat(std::function<void(parsed_request&, packet_response&)> func) {
+			return (func != nullptr) ? IMPLEMENTED : NOT_IMPLEMENTED;
+		}
+
     };
 
 	class webserver {
 	private:
         std::queue<request_packet> clients;
+		logging::logger wlog;
         request_router routes;
         nofetch_threadpool pool;
 
@@ -421,7 +465,8 @@ namespace http {
     public:
         webserver(const char *cache_path, const char *logs_path, int port, int backlog, int thread_count):
         pool(thread_count),
-        routes(std::string(cache_path), std::string(logs_path)){
+		wlog(std::string(logs_path)),
+        routes(std::string(cache_path), wlog){
             socket_fd = socket(AF_INET, SOCK_STREAM, 0);
             if (socket_fd == SOCKET_ERROR)
                 throw std::runtime_error("Unable to initialize webserver socket");
@@ -445,6 +490,7 @@ namespace http {
             flag.store(false);
             pool.shutdown();
             worker.join();
+			wlog.shutdown();
         }
 
         inline void get(std::string path, std::function<void(parsed_request&, packet_response&)> route) {
