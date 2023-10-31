@@ -23,6 +23,14 @@ std::string read_f(std::string path) {
 	return buffer;
 }
 
+ssize_t fetch_size_s(std::string path) {
+	std::ifstream fd;
+	fd.open(path, std::ios::binary);
+	fd.seekg(0, std::ios_base::end);
+	ssize_t size = fd.tellg();
+	return size;
+}
+
 inline std::string hexify(long val) {
 	std::stringstream stream;
 	stream << std::hex << val;
