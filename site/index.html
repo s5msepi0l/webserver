@@ -3,22 +3,39 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Document</title>
+        <title>CPPwebserver</title>
     </head>
 
     <body>
-        <header> Hello, friend...</header>
-        
         <main>
-            <section>
-                <h1> Audio transmission sample </h1>
-            <!-- add video path as needed -->
-            </section>
 
-            <section>
-                <h1> Video transmission sample </h1>
-                <!-- add video path as needed -->
-            </section>
         </main>
+
+        <section id="sample">
+            <h1> Media transmission examples </h1>
+
+            <div id="video-sample">
+                <h2> Video sample </h2>
+
+                <video controls>
+                    <source src="video.mp4">
+                </video>
+            </div>
+
+            <div id="image-sample">
+                <h2> Image sample </h2>
+                <img src="img.jpg">
+            </div>
+            
+            <div id="audio-sample">
+                <h2> Audio sample </h2>
+
+                <audio controls>
+                    <source src="sound.mp3">
+                </audio>
+            </div>
+
+        </section>
+
     </body>
 </html>
