@@ -170,12 +170,18 @@ typedef struct packet_response {
     std::string content_type;
     size_t length;
 
-    int chunked;
-
 	packet_response(SOCKET Dst): fd(Dst) {}
 
-    inline void _send_all(std::string cache_mem, parsed_request &request) {
+	inline int _send(std::string Src) {
+		return send(fd, Src.c_str(), Src.size(), 0);
+	}
+
+    int _send_all(std::string cache_mem, parsed_request &request) {
         long cache_size = cache_mem.size();
+		if (cache_size <= BUFFER_SIZE) {
+			_send(cache_mem);
+		}
+
         std::stringstream res;
         res << "HTTP/1.1 200 OK\r\n"
             << "Content-Type: " << this->content_type << "\r\n"
@@ -206,23 +212,13 @@ typedef struct packet_response {
         }
 
         // final packet indicating EOF
-        send(request.fd, "0\r\n\r\n", 5, 0);
-    }
-
-    void _send(std::string cache_mem, SOCKET fd) { // single packet response
-        send(fd, cache_mem.c_str(), cache_mem.size(), 0);
+        return send(request.fd, "0\r\n\r\n", 5, 0);
     }
 
 }packet_response;
 
 inline void set_body_content(std::string path, packet_response &content) {
     content.body = path;
-    content.chunked = 0;
-}
-
-inline void set_body_media_content(std::string path, packet_response &content) {
-    content.body = path;
-    content.chunked = 1;
 }
 
 inline void set_content_type(std::string type, packet_response &content) {
@@ -380,22 +376,23 @@ namespace http {
 			while (1) {	
 			    int status = _recv(client.fd, client.data, false);
 			    std::cout << "connection status: " << status << std::endl;
-			    if (status <= 0) break;
+			    if (status <= 0) goto terminate_connection;
 
                 parsed_request request = parser.parse(client);
                 packet_response response(request.fd);
 
-			    // ugly ass giant if-else statement, change this asap possibly to a swtich case via enum's
                 std::function<void(parsed_request&, packet_response&)> func = routes[request.dest];
                 route_status res = route_stat(func);
                 switch(res) {
-                    case NOT_IMPLEMENTED:
-                        std::cout << "no route found\n" << request.dest.path << " path \n" << request.dest.method << std::endl;
+                    case NOT_IMPLEMENTED: // 501
+                        std::cout << "no route found\n" << request.dest.path << "\n path" << request.dest.method << std::endl;
 
                         response.status = 501;
                         response.body = "Unable to find requested_path";
                         set_content_type("text/html", response);
-                        break;
+						response._send(parser.format(response));
+					
+						goto terminate_connection;
                     
                     case IMPLEMENTED:
                         std::cout << "excv interface\n";
@@ -403,28 +400,26 @@ namespace http {
                         std::string cache_mem = cache.fetch(response.body);
                         long cache_size = cache_mem.size();
 
-                        // file transfer
-                        if (response.chunked) {
+                        if (cache_size > BUFFER_SIZE) { //send chunked response
                             response._send_all(cache_mem, request);
-                        }
-                        else {
-					        std::cout << "normal response\n\n\n\n\n\n\n\n";
+							break;
+						}
+                        
+					    std::cout << "normal response\n\n\n\n\n\n\n\n";
 
-					        response.body = cache_mem;
-                            response.length = cache_mem.size();
-                            std::string packet_buffer = parser.format(response);
+					    response.body = cache_mem;
+                        response.length = cache_mem.size();
+                        std::string packet_buffer = parser.format(response);
 					        
-
-					        //_send(request.fd, packet_buffer);
-					        std::cout << "sending response: " << send(request.fd, packet_buffer.c_str(), packet_buffer.size(), 0) << std::endl;
-					        packets_sent++;
-                        }
+					    std::cout << "sending response: " << response._send(packet_buffer) << std::endl;
+					    packets_sent++;
+                        
 						
 						break;
                     }    
                 }
 			
-
+			terminate_connection:
 
 			std::cout << "closing: " << client.fd << std::endl;
 			std::cout << "packet sent before closing: " << packets_sent << std::endl;
@@ -435,7 +430,7 @@ namespace http {
                 #endif
 
                 #ifdef __linux__
-					throw "Unable to terminate tcp connection";
+					throw std::runtime_error("Unable to terminate tcp connection");
                 #endif
 					
             }
