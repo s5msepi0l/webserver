@@ -32,9 +32,7 @@ int main(int argc, const char **argv) {
 		set_content_status(200, response);
 	});
 
-	sleep(120);
-
-    server.shutdown();
+	server.run();
 
 	return 0;
 }
