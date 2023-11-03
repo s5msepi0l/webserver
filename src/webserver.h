@@ -18,8 +18,7 @@
     RANT END
 
 Note: to change (any) of the finner details via macro defenitions you will have to
-		define them before you include the header file, macro defenitions are documented in the readme
-
+	define them before you include the header file, macro defenitions are documented in the readme
 Note: Http Keep-Alive support is done via threadpool with added load queuing
 Note: Refrain from tweaking the networking structs too much as it may cause tech-debt
 Note: logs only contain connections information along with the amount of requests sent by the client
@@ -62,6 +61,10 @@ TODO:
 #define CACHE_SIZE 5
 #endif
 
+#ifndef CONNECTION_TIMEO
+#define CONNECTION_TIMEO 300 // 5 minutes
+#endif
+
 #define CLIENT_CON "[Connection established]"
 #define CLIENT_DISCON "[Connection terminated]"
 
@@ -77,7 +80,8 @@ TODO:
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <arpa/inet.h>
-	
+	#include <cerrno>	
+
 	#include <sys/ioctl.h> // ip fetching
 	#include <linux/if.h>
 
@@ -103,8 +107,7 @@ inline int _recv(SOCKET fd, std::string &buffer, bool appval) {
 
 	char data_buffer[BUFFER_SIZE]{ 0 };
     size_t bytes_recv;
-	if ((bytes_recv = recv(fd, data_buffer, BUFFER_SIZE - 1, 0)) < 0)
-        return -1;
+	bytes_recv = recv(fd, data_buffer, BUFFER_SIZE - 1, 0);
 
 	data_buffer[bytes_recv] = '\0'; // as to not fill the entire buffer with the buffer amount
 	buffer += data_buffer; //assuming that the buffer param will be empty when passed
@@ -366,17 +369,29 @@ namespace http {
 		// executed by threadpool contains 90% of all important routing and miscellaneous functionality
         // Note: ugly ass indentaion and horrendus if-else statement(s)
 		void execute(request_packet client) {
-            std::cout << "client thread start\n";
-
-			// %Y-%m-%d - source address - event information
 			std::string src_addr = fetch_ip(client.fd); // public ip address might 
+			
+			struct timeval timeout;
+			timeout.tv_sec = CONNECTION_TIMEO;
+			timeout.tv_usec = 0;
+
+			if (setsockopt(client.fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
+				w_log.write(logging::fetch_date_s, " - ", src_addr, " Unable to set connection timeout");
+				goto terminate_connection;
+			}
+
 			w_log.write(logging::fetch_date_s(), " - ", src_addr, " Connected"); 
 
 			int packets_sent = 0;	// used for logging purposes
+			int status = 0;
 			while (1) {	
-			    int status = _recv(client.fd, client.data, false);
+			    if ((status = _recv(client.fd, client.data, false)) == SOCKET_ERROR) {
+					if (errno == EAGAIN || errno == EWOULDBLOCK)
+						goto terminate_connection;
+				}
+				
+
 			    std::cout << "connection status: " << status << std::endl;
-			    if (status <= 0) goto terminate_connection;
 
                 parsed_request request = parser.parse(client);
                 packet_response response(request.fd);
@@ -454,7 +469,7 @@ namespace http {
         sockaddr_in server_addr;
         socklen_t server_len;
 
-        std::thread worker;
+        std::thread worker;		// incase user want's to use main thread
         std::atomic<bool> flag;
 
     public:
@@ -476,15 +491,24 @@ namespace http {
 
             if (listen(socket_fd, backlog) == SOCKET_ERROR)
                 throw std::runtime_error("Unable to listen on port: " + std::to_string(port));
-        
-            flag.store(true);
-            worker = std::thread(&http::webserver::acpt_worker, this);
-        }
+			
+			flag.store(true);
+		}
 
-        void shutdown() {
+		inline void run() {
+			acpt_worker();
+		}
+		
+		inline void async_run() {
+			worker = std::thread(&http::webserver::acpt_worker, this);
+		}
+
+        void async_shutdown() {
             flag.store(false);
             pool.shutdown();
-            worker.join();
+			if (worker.joinable())
+				worker.join();
+			
 			wlog.shutdown();
         }
 
