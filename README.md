@@ -31,13 +31,11 @@ int main(int argc, const char **argv) {
 <h1> Features </h1>
 
 <ul>
-  <li>
-    <h3> Keep-alive support </h3>
-    <h3> In house json implementation</h3>
-    <h3> Automatic ip and activity logger </h3>
-    <h3> Non main thread blocking so you can use it on top of other application's </h3>
-    <h3> Automatic static content caching and retrival </h3>
-  </li>
+  <li> Keep-alive support </li>
+  <li> In house json implementation</li>
+  <li> Automatic ip and activity logger </li>
+  <li> Non main thread blocking so you can use it on top of other application's </li>
+  <li> Automatic static content caching and retrival </li>
 </ul>
 
 <h1> preprocessor macros documentation </h1>
