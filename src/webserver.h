@@ -17,6 +17,7 @@
         are involved
     RANT END
 
+Note: I added a filecache refrence to the interface to resolve some admittedly crappy tech debt
 Note: to change (any) of the finner details via macro defenitions you will have to
 	define them before you include the header file, macro defenitions are documented in the readme
 Note: Http Keep-Alive support is done via threadpool with added load queuing
@@ -24,7 +25,6 @@ Note: Refrain from tweaking the networking structs too much as it may cause tech
 Note: logs only contain connections information along with the amount of requests sent by the client
 
 TODO:
-	- Improve cache thread-safety & make webapp use common cache
 
 	- Add optional ip-address whitelisting
 	- Implement automatic chunking based on cache size when retrieved
@@ -43,6 +43,7 @@ TODO:
 #include <iostream>
 #include <queue>
 #include <atomic>
+#include <memory>
 
 #include <map>
 #include <unordered_set> // bst
@@ -354,7 +355,7 @@ namespace http {
 
 	class request_router {
 	private:
-        file_cache cache;
+		file_cache cache; //don't use this directly
 		logging::logger &w_log;
         std::unordered_map<destination, std::function<void(parsed_request&, packet_response&)>> routes;
 
@@ -373,6 +374,8 @@ namespace http {
 		// executed by threadpool contains 90% of all important routing and miscellaneous functionality
         // Note: ugly ass indentaion and horrendus if-else statement(s)
 		void execute(request_packet client) {
+			std::shared_ptr<file_cache> cache_ptr = std::make_shared<file_cache>(this->cache); // one must imagine sisyphus happy
+
 			std::string src_addr = fetch_ip(client.fd); // public ip address might 
 			int packets_sent = 0;
 			int status = 0;
@@ -389,7 +392,7 @@ namespace http {
 				goto terminate_connection;
 			}
 
-			w_log.write(logging::fetch_date_s(), " - ", src_addr, " Connected"); 
+		w_log.write(logging::fetch_date_s(), " - ", src_addr, " Connected"); 
 			while (1) {	
 			    if ((status = _recv(client.fd, client.data, false)) == SOCKET_ERROR) {
 					if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -417,7 +420,7 @@ namespace http {
                     case IMPLEMENTED:
                         std::cout << "excv interface\n";
                         func(request, response);
-                        std::string cache_mem = cache.fetch(response.body); //retrieve cache content
+                        std::string cache_mem = cache_ptr->fetch(response.body); //retrieve cache content
                         long cache_size = cache_mem.size();
 
 					    std::cout << "normal response\n\n\n\n\n\n\n\n";
@@ -475,7 +478,7 @@ namespace http {
         webserver(const char *cache_path, const char *logs_path, int port, int backlog, int thread_count):
         pool(thread_count),
 		wlog(std::string(logs_path)),
-        routes(std::string(cache_path), wlog){
+		routes(std::string(cache_path), wlog){
             socket_fd = socket(AF_INET, SOCK_STREAM, 0);
             if (socket_fd == SOCKET_ERROR)
                 throw std::runtime_error("Unable to initialize webserver socket");
