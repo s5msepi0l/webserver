@@ -23,11 +23,10 @@ Note: Http Keep-Alive support is done via threadpool with added load queuing
 Note: Refrain from tweaking the networking structs too much as it may cause tech-debt
 Note: logs only contain connections information along with the amount of requests sent by the client
 
-TODO: 
-	- Add support http Keep-Alive support via multithreadingi
-	- Implement Keep-Alive server-size timeout
+TODO:
+	- Improve cache thread-safety & make webapp use common cache
+
 	- Add optional ip-address whitelisting
-	- Add optional Data logging
 	- Implement automatic chunking based on cache size when retrieved
 	- Make JSON implementation less "fucky" to work with
 	- Add basic json support for receiving packet and sending
@@ -161,6 +160,7 @@ namespace std {
 //parsed packet data to be directly passed to client on a silver platter
 typedef struct {
     SOCKET fd;
+	bool keep_alive;
     destination dest;
     std::unordered_map<std::string, std::string> cookies;
 } parsed_request;
@@ -175,16 +175,15 @@ typedef struct packet_response {
 
 	packet_response(SOCKET Dst): fd(Dst) {}
 
-	inline int _send(std::string Src) {
-		return send(fd, Src.c_str(), Src.size(), 0);
+	int _send(std::string Src) {
+		if (Src.size() < BUFFER_SIZE)
+			return send(fd, Src.c_str(), Src.size(), 0);
+		
+		return _send_all(Src);
 	}
 
-    int _send_all(std::string cache_mem, parsed_request &request) {
+    inline int _send_all(std::string cache_mem) {
         long cache_size = cache_mem.size();
-		if (cache_size <= BUFFER_SIZE) {
-			_send(cache_mem);
-		}
-
         std::stringstream res;
         res << "HTTP/1.1 200 OK\r\n"
             << "Content-Type: " << this->content_type << "\r\n"
@@ -192,8 +191,8 @@ typedef struct packet_response {
             << "\r\n";
 
         // Send the HTTP headers
-        const std::string &responseStr = res.str();
-        send(request.fd, responseStr.c_str(), responseStr.length(), 0);
+        const std::string &response_str = res.str();
+        send(this->fd, response_str.c_str(), response_str.length(), 0);
 
         long bytes_sent = 0;
         while (bytes_sent < cache_size)
@@ -205,40 +204,39 @@ typedef struct packet_response {
             chunk_header.reserve((chunk_size % 15) + 2);
             chunk_header.append(hexify(chunk_size));
             chunk_header.append("\r\n");
-            send(request.fd, chunk_header.c_str(), chunk_header.size(), 0);
+            send(this->fd, chunk_header.c_str(), chunk_header.size(), 0);
 
-            send(request.fd, cache_mem.c_str() + bytes_sent, chunk_size, 0);
+            send(this->fd, cache_mem.c_str() + bytes_sent, chunk_size, 0);
 
-            send(request.fd, "\r\n", 2, 0);
+            send(this->fd, "\r\n", 2, 0);
 
             bytes_sent += chunk_size;
         }
 
         // final packet indicating EOF
-        return send(request.fd, "0\r\n\r\n", 5, 0);
+        return send(this->fd, "0\r\n\r\n", 5, 0);
     }
+	
+	inline void set_body_content(std::string path) {
+		this->body = path;
+	}
 
+	inline void set_content_type(std::string type) {
+		this->content_type = type;
+	}
+
+	inline void set_content_status(int code) {
+		this->status = code;
+	}
+
+	// mainly used for debugging purposes
+	inline void display_packet(packet_response Src) {
+		std::cout << "status: " << Src.status << '\n'
+			<< "length: " << Src.length << '\n'
+			<< "content-type: " << Src.content_type << '\n'
+		    << "body: " << Src.body << std::endl;
+	}
 }packet_response;
-
-inline void set_body_content(std::string path, packet_response &content) {
-    content.body = path;
-}
-
-inline void set_content_type(std::string type, packet_response &content) {
-    content.content_type = type;
-}
-
-inline void set_content_status(int code, packet_response& content) {
-    content.status = code;
-}
-
-// mainly used for debugging purposes
-inline void display_packet(packet_response Src) {
-    std::cout << "status: " << Src.status << '\n'
-        << "length: " << Src.length << '\n'
-        << "content-type: " << Src.content_type << '\n'
-        << "body: " << Src.body << std::endl;
-}
 
 // contains logging utility relevant to the webserver
 namespace log_util {
@@ -263,83 +261,90 @@ namespace http {
 		return std::string(inet_ntoa(addr.sin_addr));
 	}
 
-    class packet_parser {
-    public: //variables
-        std::unordered_map<int, std::string> status_codes;
+    std::string format_http(packet_response Src) {
+		std::string status_code;
+		switch(Src.status) {
+			case 200:
+				status_code = "OK";
+				break;
+					
+			case 501:
+				status_code = "Not Implemented";
+				break;
+		}
 
-    public: //public interface logic
-        packet_parser() {
-            status_codes[200] = "OK";
-            status_codes[501] = "Not Implemented";
-         }
+		std::string buffer;
+        buffer += "HTTP/1.1 " + (std::to_string(Src.status) + " " + status_code + "\r\n");
+        buffer += "Content-Type: " + Src.content_type+ "\r\n";
+        buffer += ("Content-Length: " + std::to_string(Src.length) + "\r\n\r\n");
+        buffer += Src.body;
 
-        std::string format(packet_response Src) {
-            std::string buffer;
-            buffer += "HTTP/1.1 " + std::string(std::to_string(Src.status) + " " + status_codes[Src.status] + "\r\n");
-            buffer += "Content-Type: " + Src.content_type+ "\r\n";
-            buffer += ("Content-Length: " + std::to_string(Src.length) + "\r\n\r\n");
-            buffer += Src.body;
+        buffer.append("\r\n\r\n");
 
-            buffer.append("\r\n\r\n");
+        return buffer;
+    }
 
-            return buffer;
+	//wrote this ages ago no idea how or why it works
+    parsed_request parse_http(const request_packet& request) {
+        parsed_request http_request;
+        std::string buffer(request.data);
+
+        // find method
+        int method_end = buffer.find(' ');
+        if (method_end != std::string::npos) {
+            std::string tmp = buffer.substr(0, method_end);
+
+            // can't really make switch case with strings as that would requre an entire function call
+            if (tmp == "GET")  http_request.dest.method = GET;
+            else if (tmp == "POST") http_request.dest.method = POST;
         }
 
-		//wrote this ages ago no idea how or why it works
-        parsed_request parse(const request_packet& request) {
-            parsed_request httpRequest;
-            std::string buffer(request.data);
+        // find path
+        int path_start = method_end + 1;
+        int path_end = buffer.find(' ', path_start);
+        if (path_end != std::string::npos)
+            http_request.dest.path = buffer.substr(path_start, path_end - path_start);
 
-            // find method
-            int methodEnd = buffer.find(' ');
-            if (methodEnd != std::string::npos) {
-                std::string tmp = buffer.substr(0, methodEnd);
+        // find cookies (if any)
+        int cookie_start = buffer.find("Cookie: ");
+        if (cookie_start != std::string::npos) {
+            cookie_start += 8; // Skip "Cookie: "
+            int cookie_end = buffer.find("\r\n", cookie_start);
+            std::string cookies = buffer.substr(cookie_start, cookie_end - cookie_start);
 
-                // can't really make switch case with strings as that would requre an entire function call
-                if (tmp == "GET")  httpRequest.dest.method = GET;
-                else if (tmp == "POST") httpRequest.dest.method = POST;
-            }
-
-            // find path
-            int pathStart = methodEnd + 1;
-            int pathEnd = buffer.find(' ', pathStart);
-            if (pathEnd != std::string::npos)
-                httpRequest.dest.path = buffer.substr(pathStart, pathEnd - pathStart);
-
-            // find cookies (if any)
-            int cookieStart = buffer.find("Cookie: ");
-            if (cookieStart != std::string::npos) {
-                cookieStart += 8; // Skip "Cookie: "
-                int cookieEnd = buffer.find("\r\n", cookieStart);
-                std::string cookies = buffer.substr(cookieStart, cookieEnd - cookieStart);
-
-                int separatorPos = cookies.find(';');
-                int keyValueSeparatorPos;
-                while (separatorPos != std::string::npos) {
-                    std::string cookie = cookies.substr(0, separatorPos);
-                    keyValueSeparatorPos = cookie.find('=');
-                    if (keyValueSeparatorPos != std::string::npos) {
-                        std::string key = cookie.substr(0, keyValueSeparatorPos);
-                        std::string value = cookie.substr(keyValueSeparatorPos + 1);
-                        httpRequest.cookies[key] = value;
-                    }
-
-                    cookies.erase(0, separatorPos + 1);
-                    separatorPos = cookies.find(';');
+            int separator_pos = cookies.find(';');
+            int key_value_separator_pos;
+            while (separator_pos != std::string::npos) {
+                std::string cookie = cookies.substr(0, separator_pos);
+                key_value_separator_pos = cookie.find('=');
+                if (key_value_separator_pos != std::string::npos) {
+                    std::string key = cookie.substr(0, key_value_separator_pos);
+                    std::string value = cookie.substr(key_value_separator_pos + 1);
+                    http_request.cookies[key] = value;
                 }
 
-                keyValueSeparatorPos = cookies.find('=');
-                if (keyValueSeparatorPos != std::string::npos) {
-                    std::string key = cookies.substr(0, keyValueSeparatorPos);
-                    std::string value = cookies.substr(keyValueSeparatorPos + 1);
-                    httpRequest.cookies[key] = value;
-                }
+                cookies.erase(0, separator_pos + 1);
+				separator_pos = cookies.find(';');
             }
 
-            httpRequest.fd = request.fd;
-            return httpRequest;
+			key_value_separator_pos = cookies.find('=');
+			if (key_value_separator_pos != std::string::npos) {
+				std::string key = cookies.substr(0, key_value_separator_pos);
+				std::string value = cookies.substr(key_value_separator_pos + 1);
+				http_request.cookies[key] = value;
+            }
         }
-    };
+
+		int keep_alive_start = buffer.find("Connection: keep-alive");
+		if (keep_alive_start != std::string::npos) {
+			http_request.keep_alive = true;
+		} else {
+			http_request.keep_alive = false;
+		}
+
+        http_request.fd = request.fd;
+        return http_request;
+    }
 
 	// done for Readability sakes will, O2 will probably even it out
 	enum route_status{
@@ -351,7 +356,6 @@ namespace http {
 	private:
         file_cache cache;
 		logging::logger &w_log;
-        packet_parser parser;
         std::unordered_map<destination, std::function<void(parsed_request&, packet_response&)>> routes;
 
     public:
@@ -370,30 +374,31 @@ namespace http {
         // Note: ugly ass indentaion and horrendus if-else statement(s)
 		void execute(request_packet client) {
 			std::string src_addr = fetch_ip(client.fd); // public ip address might 
-			
+			int packets_sent = 0;
+			int status = 0;
+
+			//set fd recv timeout
 			struct timeval timeout;
 			timeout.tv_sec = CONNECTION_TIMEO;
 			timeout.tv_usec = 0;
 
+			// kinda janky but session timeouts are done via recv timeout's so if EWOULDBLOCK is reached the 
+			// connection is immedietly terminated
 			if (setsockopt(client.fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
 				w_log.write(logging::fetch_date_s, " - ", src_addr, " Unable to set connection timeout");
 				goto terminate_connection;
 			}
 
 			w_log.write(logging::fetch_date_s(), " - ", src_addr, " Connected"); 
-
-			int packets_sent = 0;	// used for logging purposes
-			int status = 0;
 			while (1) {	
 			    if ((status = _recv(client.fd, client.data, false)) == SOCKET_ERROR) {
 					if (errno == EAGAIN || errno == EWOULDBLOCK)
-						goto terminate_connection;
-				}
-				
+						goto terminate_connection;	
+				}	
 
 			    std::cout << "connection status: " << status << std::endl;
 
-                parsed_request request = parser.parse(client);
+                parsed_request request = parse_http(client);
                 packet_response response(request.fd);
 
                 std::function<void(parsed_request&, packet_response&)> func = routes[request.dest];
@@ -404,31 +409,25 @@ namespace http {
 
                         response.status = 501;
                         response.body = "Unable to find requested_path";
-                        set_content_type("text/html", response);
-						response._send(parser.format(response));
+                        response.set_content_type("text/html");
+						response._send(format_http(response));
 					
 						goto terminate_connection;
                     
                     case IMPLEMENTED:
                         std::cout << "excv interface\n";
                         func(request, response);
-                        std::string cache_mem = cache.fetch(response.body);
+                        std::string cache_mem = cache.fetch(response.body); //retrieve cache content
                         long cache_size = cache_mem.size();
 
-                        if (cache_size > BUFFER_SIZE) { //send chunked response
-                            response._send_all(cache_mem, request);
-							break;
-						}
-                        
 					    std::cout << "normal response\n\n\n\n\n\n\n\n";
 
 					    response.body = cache_mem;
                         response.length = cache_mem.size();
-                        std::string packet_buffer = parser.format(response);
+                        std::string packet_buffer = format_http(response);
 					        
 					    std::cout << "sending response: " << response._send(packet_buffer) << std::endl;
 					    packets_sent++;
-                        
 						
 						break;
                     }    
