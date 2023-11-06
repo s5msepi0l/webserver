@@ -17,7 +17,6 @@ public:
 			return cache_map[key]->second;
 		}
 		
-		std::cout << "cache not found\n";
 		return "";
 	}
 
@@ -25,7 +24,6 @@ public:
 		if (cache_map.find(key) != cache_map.end()) {
 			move_head(key);
 
-			std::cout << "cache already exists\n";
 			return;
 		}
 
@@ -33,8 +31,6 @@ public:
 			std::string tailkey = cache_nodes.back().first;
 			cache_nodes.pop_back();
 			cache_map.erase(tailkey);
-
-			std::cout << "cache full\n";
 		}
 
 		cache_nodes.push_front({ key, value });
