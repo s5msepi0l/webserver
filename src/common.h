@@ -23,6 +23,21 @@ std::string read_f(std::string path) {
 	return buffer;
 }
 
+std::vector<std::string> read_l(std::string path) {
+	std::vector<std::string> buffer;
+	std::string line;
+
+	std::ifstream fd(path, std::ios::binary);
+	if (fd.is_open()) {
+		while (std::getline(fd, line)) {
+			buffer.push_back(line);
+		}
+		fd.close();
+	}
+
+	return buffer;
+}
+
 ssize_t fetch_size_s(std::string path) {
 	std::ifstream fd;
 	fd.open(path, std::ios::binary);
