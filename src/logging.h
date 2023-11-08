@@ -136,6 +136,7 @@ namespace logging {
 				if (chunk_size >= LOGGER_ENABLE_AUTO_WRITE) { //
 					fd.close();
 					
+					std::cout << "reopening file: " << std::string(path + "/" + fd_id) << '\n';
 					fd.open(
 					std::string(path + "/" + fd_id),
 					std::ios::app );
