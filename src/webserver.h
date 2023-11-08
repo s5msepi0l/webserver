@@ -27,7 +27,6 @@ Note: logs only contain connections information along with the amount of request
 TODO:
 	- Automatically set http content type
 	- Add optional ip-address whitelisting
-	- Implement automatic chunking based on cache size when retrieved
 	- Make JSON implementation less "fucky" to work with
 	- Add basic json support for receiving packet and sending
 	- Update logging for more customizability and robust functionality
@@ -160,6 +159,7 @@ namespace std {
 //parsed packet data to be directly passed to client on a silver platter
 typedef struct {
     SOCKET fd;
+	std::string body;
 	bool keep_alive;
     destination dest;
     std::unordered_map<std::string, std::string> cookies;
@@ -366,6 +366,27 @@ namespace http {
         return http_request;
     }
 
+	class whitelist {
+		private:
+			std::unordered_set<std::string> tree;
+
+		public:
+			whitelist(std::string path) {
+				std::vector<std::string> lst = read_l(path);
+				for (int i = 0; i<lst.size(); i++) {
+					tree.insert(lst[i]);
+				}
+			}
+
+			inline void add(std::string Src) {
+				tree.insert(Src);
+			}
+
+			inline bool auth(std::string val) {
+				return (tree.find(val) != tree.end()) ? true : false;
+			}
+	};
+
 	// done for Readability sakes will, O2 will probably even it out
 	enum route_status{
 		NOT_IMPLEMENTED = 0,
@@ -406,28 +427,37 @@ namespace http {
 			// kinda janky but session timeouts are done via recv timeout's so if EWOULDBLOCK is reached the 
 			// connection is subsequently terminated
 			if (setsockopt(client.fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
-				w_log.write('[', logging::fetch_date_s, ']', " - ", src_addr, " - ",
+				w_log.write('[', logging::fetch_date_s, ']', " - ", "[INFO]", src_addr, "   - ",
 						"Unable to set connection timeout");
 				goto terminate_connection;
 			}
 
-			w_log.write('[', logging::fetch_date_s(), ']', " - ", src_addr, " - ", "Connected"); 
+			w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Connected"); 
 			while (1) {	
-			    if ((status = _recv(client.fd, client.data, false)) == SOCKET_ERROR) {
+				status = _recv(client.fd, client.data, false);
+			    if (status == SOCKET_ERROR) {
 					if (errno == EAGAIN || errno == EWOULDBLOCK) {
-						w_log.write('[', logging::fetch_date_s(), ']', " - ", src_addr, " Session timeout");
+						w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Session timeout");
+						std::cout << "SESSION_TIMEO\n";
 						goto terminate_connection;	
 					}
-				}	
+				}
+
+				if (status == 0) { // connection terminated
+					std::cout << "Connection reset\n";
+					w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Connection closed by peer");
+					goto terminate_connection; 
+				}
 
                 parsed_request request = parse_http(client);
                 packet_response response(request.fd);
 
-				w_log.write('[', logging::fetch_date_s(), ']', " - ", src_addr, " Requested: ", '[', request.dest.path, ']');
+				w_log.write('[', logging::fetch_date_s(), ']', " - ", "[INFO]", "   - ", src_addr, " Requested: ", '[', request.dest.path, ']');
 	
                 std::function<void(parsed_request&, packet_response&, f_cache&)> func = routes[request.dest];
                 route_status res = route_stat(func);
-                switch(res) {
+                
+				switch(res) {
                     case NOT_IMPLEMENTED: // 404
                         std::cout << "no route found\n" << request.dest.path << "\n path" << request.dest.method << std::endl;
 
@@ -436,11 +466,13 @@ namespace http {
                         response.set_content_type("text/html");
 						response._send();
 					
-						w_log.write('[', logging::fetch_date_s(), ']', " - ", src_addr, " Unable to fetch: ", request.dest.path);
+						w_log.write('[', logging::fetch_date_s(), ']', " - ", "[INFO]", "   - ", src_addr, " Unable to fetch: ", request.dest.path);
+						//goto terminate_connection;
+						
+						break;
 
-						goto terminate_connection;
-                    
                     case IMPLEMENTED:
+						std::cout << "route found!, path: " << request.dest.path << " method: " << request.dest.method << std::endl;
                         func(request, response, cache_ptr);
 					    response._send();
 
@@ -451,7 +483,7 @@ namespace http {
                 }
 			
 			terminate_connection:
-
+			std::cout << "\n\n CLOSING CONNECTION: " << client.fd << "\n\n";
 			if (closesocket(client.fd) == SOCKET_ERROR) {
 				#ifdef _WIN32
                     std::cout << WSAGetLastError() << std::endl;
@@ -486,10 +518,10 @@ namespace http {
         std::atomic<bool> flag;
 
     public:
-        webserver(const char *cache_path, const char *logs_path, int port, int backlog, int thread_count):
+        webserver(std::string content_path, int port, int backlog, int thread_count):
         pool(thread_count),
-		wlog(std::string(logs_path)),
-		routes(std::string(cache_path), wlog){
+		wlog(content_path + "/logs"),
+		routes(content_path + "/site", wlog){
             socket_fd = socket(AF_INET, SOCK_STREAM, 0);
             if (socket_fd == SOCKET_ERROR)
                 throw std::runtime_error("Unable to initialize webserver socket");
