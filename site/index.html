@@ -3,39 +3,17 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>CPPwebserver</title>
+        <title>Document</title>
+        <link rel="stylesheet" href="style.css">
     </head>
 
     <body>
         <main>
-
+            <form id="Login" onsubmit="send_http_request()">
+                <input type="submit" value="Login">
+            </form>
         </main>
 
-        <section id="sample">
-            <h1> Media transmission examples </h1>
-
-            <div id="video-sample">
-                <h2> Video sample </h2>
-
-                <video controls>
-                    <source src="video.mp4">
-                </video>
-            </div>
-
-            <div id="image-sample">
-                <h2> Image sample </h2>
-                <img src="img.jpg">
-            </div>
-            
-            <div id="audio-sample">
-                <h2> Audio sample </h2>
-
-                <audio controls>
-                    <source src="sound.mp3">
-                </audio>
-            </div>
-
-        </section>
-
+        <script src="script.js"></script>
     </body>
 </html>
