@@ -1,1 +1,123 @@
-* { background-color: black; }
+.font {
+    font-family: 'Oswald', sans-serif;
+    color: #000000;
+    text-decoration: none;
+    font-style: normal;
+    font-variant: normal;
+    text-transform: capitalize;
+}
+
+.bold {
+    font-weight: 700;
+}
+
+body {
+    background-color: rgb(245, 245, 245);
+}
+
+.navbar{
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+
+    position:static;
+    width: 99vw;
+    height: 10vh;
+    
+    top: 0;
+    left: 0;
+    
+    background-color: rgb(250, 250, 250);
+  
+    border-bottom: 1vh solid rgba(235, 235, 235, 0.3);
+
+    min-height: 50px;
+    
+}
+
+.left {
+    display: flex;
+    flex-direction: row;
+}
+
+.links {
+    padding: 0.8rem;
+    
+    font-size: 1.6rem;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+
+    justify-content: space-between;
+    gap: 2rem;
+}
+
+#logo {
+    position: relative;
+    padding-top: 2.5rem;
+    padding-left: 1rem;
+    padding-right: 2rem;
+
+    top: -25px;
+
+    font-size: 3rem;
+}
+
+.github {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+    padding-right: 1rem;
+}
+
+.github-link {
+    font-size: 1.3rem;
+    padding-top: 0.3rem;
+    padding-left: 1rem;
+
+    text-decoration: none;
+    color: black;
+}
+
+main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    gap: 3rem;
+
+    z-index: 1;
+    position: relative;
+    top: 0vh;
+    left: calc(10vw);
+
+    background-color: white;
+    width: 80vw;
+    height: 300vh;
+}
+
+#intro {
+    display: flex;
+    justify-items: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+#intro h1 {
+    font-size: 3rem;
+    border-bottom: 2px solid black;
+}
+
+#intro p {
+    font-size: 1.5rem;
+}
+
+.hr {
+    width: 60vw;
+    height: 2px;
+
+    background-color: rgb(240, 240, 240);
+}
