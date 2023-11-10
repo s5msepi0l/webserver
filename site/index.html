@@ -3,15 +3,43 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Document</title>
+        <title>Spark</title>
+
         <link rel="stylesheet" href="style.css">
+
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Oswald&display=swap" rel="stylesheet">
     </head>
 
     <body>
+        <nav class="navbar">
+            <div class="left">
+                <h1 id="logo" class="bold font"> Spark </h1>
+                
+                <div class="links">
+                    <a class="font link"> About </a>
+                    <a class="font link"> Docs </a>    
+                    <a class="font link"> Sign up</a>
+                    <a class="font link"> Login</a>
+                </div>
+            </div>
+       
+            <div class="github">
+                <a target="_blank"  class="github-link font" href="https://github.com/s5msepi0l/webserver">GitHub</a>
+                <img class="github-img" src="static/github.png" width="40">
+            </div>
+        </nav>
+
         <main>
-            <form id="Login" onsubmit="send_http_request()">
-                <input type="submit" value="Login">
-            </form>
+            <header id="intro">
+                <h1 class="font bold"> Welcome to Spark </h1>
+                <p class="font"> An experimental lightweight c++ webserver framework </p>
+            </header>
+
+            <img class="bg-gif" src="static/wallpaper.gif" width="900">
+
+            <div class="hr"></div>
         </main>
 
         <script src="script.js"></script>
