@@ -6,30 +6,49 @@
 
 int main(int argc, const char **argv) {
 	http::webserver server(
-		"/home/s5msep1ol/Desktop/projects/webserver/backup_1/site", 
-		"/home/s5msep1ol/Desktop/projects/webserver/backup_1/logs",
+		".",
 		8001, 
 		512, 
 		4);
     
-	server.get("/", [](parsed_request& request, packet_response& response) {
-		set_body_content("index.html", response);
-		set_content_type("text/html", response);
-		set_content_status(200, response);
+	server.get("/", [](
+	parsed_request& request, packet_response& response, f_cache &cache){
+		response.set_body_content(cache->fetch("index.html"));
+		response.set_content_type("text/html");
+		response.set_content_status(200);
 
 	});
 
-	server.get("/video.mp4", [](parsed_request& request, packet_response& response) {
-		set_body_content("video.mp4", response);
-		set_content_type("video/mp4", response);
-		set_content_status(200, response);
+	server.get("/style.css", [](
+	parsed_request& request, packet_response& response, f_cache &cache){
+		response.set_body_content(cache->fetch("style.css"));
+		response.set_content_type("text/css");
+		response.set_content_status(200);
+
 	});
 
+	server.get("/script.js", [](
+	parsed_request& request, packet_response& response, f_cache &cache){
+		response.set_body_content(cache->fetch("script.js"));
+		response.set_content_type("application/javascript");
+		response.set_content_status(200);
 
-	server.get("/img.jpg", [](parsed_request& request, packet_response& response) {
-		set_body_content("img.jpg", response);
-		set_content_type("image/jpeg", response);
-		set_content_status(200, response);
+	});
+
+	server.get("/static/wallpaper.gif", [](
+	parsed_request& request, packet_response& response, f_cache &cache){
+		response.set_body_content(cache->fetch("static/wallpaper.gif"));
+		response.set_content_type("image/gif");
+		response.set_content_status(200);
+
+	});
+
+	server.get("/static/github.png", [](
+	parsed_request& request, packet_response& response, f_cache &cache){
+		response.set_body_content(cache->fetch("static/github.png"));
+		response.set_content_type("image/png");
+		response.set_content_status(200);
+
 	});
 
 	server.run();
