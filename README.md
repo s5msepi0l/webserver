@@ -6,20 +6,17 @@
 ```cpp
 #include "src/webserver.h"
 
-
 int main(int argc, const char **argv) {
 	http::webserver server(
-		"/home/s5msep1ol/Desktop/projects/webserver/backup_1/site", 
-		"/home/s5msep1ol/Desktop/projects/webserver/backup_1/logs",
+		".",
 		8001, 
 		512, 
 		4);
     
-	server.get("/", [](parsed_request& request, packet_response& response) {
-		set_body_content("index.html", response);
-		set_content_type("text/html", response);
-		set_content_status(200, response);
-
+	server.get("/", [](parsed_request& request, packet_response& response, f_cache &cache) {
+		response.set_body_content(cache->fetch("index.html"));
+		response.set_content_type("text/html");
+		response.set_content_status(200);
 	});
 
 	server.run();
@@ -36,6 +33,7 @@ int main(int argc, const char **argv) {
   <li> Automatic ip and activity logger </li>
   <li> Non main thread blocking so you can use it on top of other application's </li>
   <li> Automatic static content caching and retrival </li>
+  <li> File caching for enhanced responsivness </li>
 </ul>
 
 <h1> preprocessor macros documentation </h1>
