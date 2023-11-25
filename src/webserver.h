@@ -38,6 +38,7 @@ TODO:
 #include "threadpool.h"
 #include "cache.h"
 #include "logging.h"
+#include "json.h"
 
 #include <iostream>
 #include <queue>
@@ -100,15 +101,13 @@ inline int _send(SOCKET fd, std::string buffer) {
     return send(fd, buffer.c_str(), buffer.size(), 0);
 }
 
-inline int _recv(SOCKET fd, std::string &buffer, bool appval) {
-    if (!appval) buffer.clear();
-
+inline int _recv(SOCKET fd, std::string &buffer) {
 	char data_buffer[BUFFER_SIZE]{ 0 };
     size_t bytes_recv;
 	bytes_recv = recv(fd, data_buffer, BUFFER_SIZE - 1, 0);
 
 	data_buffer[bytes_recv] = '\0'; // as to not fill the entire buffer with the buffer amount
-	buffer += data_buffer; //assuming that the buffer param will be empty when passed
+	buffer = data_buffer; //assuming that the buffer param will be empty when passed
     
     return bytes_recv;
 }
@@ -159,7 +158,7 @@ namespace std {
 //parsed packet data to be directly passed to client on a silver platter
 typedef struct {
     SOCKET fd;
-	std::string body;
+	JSON::json body;
 	bool keep_alive;
     destination dest;
     std::unordered_map<std::string, std::string> cookies;
@@ -169,11 +168,12 @@ typedef struct packet_response {
 	SOCKET fd;
 
     int status;
-    std::string body;
     std::string content_type;
     size_t length;
 
-	packet_response(SOCKET Dst): fd(Dst) {}
+    std::string body;
+	
+	packet_response(SOCKET Dst): fd(Dst), status(200) {}
 
 	// returns the amount of induvidial packets sent to client
 	int _send() {
@@ -309,7 +309,8 @@ namespace http {
         parsed_request http_request;
         std::string buffer(request.data);
 
-        // find method
+		// creating new stack variables for every header
+		//some light compiler optimization will probably just reuse the same stack memory 
         int method_end = buffer.find(' ');
         if (method_end != std::string::npos) {
             std::string tmp = buffer.substr(0, method_end);
@@ -360,6 +361,12 @@ namespace http {
 			http_request.keep_alive = true;
 		} else {
 			http_request.keep_alive = false;
+		}
+
+		int is_json;
+		if ((is_json = buffer.find("Content-Type: application/json")) != std::string::npos) {
+			std::string json_content = buffer.substr(buffer.find("["), buffer.find("]"));
+			http_request.body = JSON::parse(json_content);
 		}
 
         http_request.fd = request.fd;
@@ -434,7 +441,7 @@ namespace http {
 
 			w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Connected"); 
 			while (1) {	
-				status = _recv(client.fd, client.data, false);
+				status = _recv(client.fd, client.data);
 			    if (status == SOCKET_ERROR) {
 					if (errno == EAGAIN || errno == EWOULDBLOCK) {
 						w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Session timeout");
