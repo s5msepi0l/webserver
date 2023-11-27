@@ -155,6 +155,21 @@ namespace std {
     };
 }
 
+//return true if connection is active
+bool conn_status(SOCKET fd) {
+	int err = 0;
+	socklen_t len = sizeof(err);
+	int retval = getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len);
+
+	if (retval != 0) { //Unable to get error code
+		fprintf(stderr, "Error getting socket error code: %s\n", strerror(retval));
+		return false;
+	}
+
+
+	return err == 0? true : false;
+}
+
 //parsed packet data to be directly passed to client on a silver platter
 typedef struct {
     SOCKET fd;
@@ -178,6 +193,10 @@ typedef struct packet_response {
 	// returns the amount of induvidial packets sent to client
 	int _send() {
 		std::string packet = format_http();
+
+		if (!conn_status(this->fd)) {
+			std::runtime_error("shit shit shit fuck goddamn it, this should never happen fuck fuck fuck");
+		}
 
 		if (packet.size() <= BUFFER_SIZE) {
 			send(fd, packet.c_str(), packet.size(), 0);
@@ -443,8 +462,8 @@ namespace http {
 			while (1) {	
 				status = _recv(client.fd, client.data);
 			    if (status == SOCKET_ERROR) {
-					if (errno == EAGAIN || errno == EWOULDBLOCK) {
-						w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Session timeout");
+					if (errno == EAGAIN || errno == EWOULDBLOCK || 0) {
+						w_log.write('[', logging::fetch_date_s(), ']', " - ", "[ACTION]", " - ", src_addr, " Session timeout, code: ", std::to_string(status));
 						std::cout << "SESSION_TIMEO\n";
 						goto terminate_connection;	
 					}
